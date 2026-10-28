@@ -21,6 +21,7 @@ import sys
 import time
 
 CONNECTOR_RE = re.compile(r"^[A-Za-z]+(-[A-Za-z])?-\d+$")
+SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 FIRMWARE_DIR = "/usr/lib/firmware/edid"
 FIRMWARE_PREFIX = "custom-resolution-panel-"
 GRUB_DEFAULT = "/etc/default/grub"
@@ -109,6 +110,8 @@ def _rewrite_grub(entries: list[str]) -> bool:
         if len(words) > 1:
             die(f"unexpected {GRUB_KEY} format; edit it by hand")
         args = [a for a in (words[0] if words else "").split() if not a.startswith(PARAM)]
+        if any("'" in a for a in args):
+            die(f"{GRUB_KEY} contains a single quote; edit it by hand")
         if entries:
             args.append(PARAM + ",".join(entries))
         new_line = f"{GRUB_KEY}='{' '.join(args)}'"
@@ -149,12 +152,28 @@ def persist(pairs: list[str]) -> None:
         entries.append(f"{name}:edid/{FIRMWARE_PREFIX}{name}.bin")
 
     if _rewrite_grub(entries):
-        subprocess.run(["grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True)
+        regenerate_grub()
+
+
+def regenerate_grub() -> None:
+    """Rebuild grub.cfg the way the distribution expects."""
+    if shutil.which("update-grub"):  # Debian, Ubuntu, Manjaro
+        cmd = ["update-grub"]
+    elif shutil.which("grub2-mkconfig"):  # Fedora, openSUSE
+        cmd = ["grub2-mkconfig", "-o", "/boot/grub2/grub.cfg"]
+    elif shutil.which("grub-mkconfig"):  # Arch
+        cmd = ["grub-mkconfig", "-o", "/boot/grub/grub.cfg"]
+    else:
+        die("GRUB was not found; only GRUB is supported for saving to boot")
+    subprocess.run(cmd, check=True)
 
 
 def main() -> None:
     if os.geteuid() != 0:
         die("must run as root (through pkexec)")
+    # Never trust the caller's environment for the programs we start as root.
+    os.environ.clear()
+    os.environ.update(PATH=SAFE_PATH, LC_ALL="C.UTF-8")
     args = sys.argv[1:]
     if len(args) == 3 and args[0] == "apply-live":
         apply_live(args[1], args[2])

@@ -13,11 +13,10 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import edid, system  # noqa: E402
-from .mutter import DisplayConfig  # noqa: E402
+from . import display, edid, system  # noqa: E402
 
 APP_ID = "io.github.wellfz.CustomResolutionPanel"
-VERSION = "0.2"
+VERSION = "0.3"
 CONFIRM_SECONDS = 15
 STYLE = Path(__file__).with_name("style.css")
 ICON = Path(__file__).parent.parent / "data" / f"{APP_ID}.svg"
@@ -221,8 +220,10 @@ class MonitorTile(Gtk.Button):
     """Monitor thumbnail in the layout map, sized after the resolution in use."""
 
     def __init__(self, mon: system.Monitor, current, primary: bool, selected: bool) -> None:
+        # vexpand=False explicitly: the name label expands inside the tile, and without this
+        # GTK would propagate that upwards and stretch the whole layout map.
         super().__init__(css_classes=["monitor-tile"] + (["selected"] if selected else []),
-                         valign=Gtk.Align.END)
+                         valign=Gtk.Align.END, vexpand=False)
         w, h = (current.width, current.height) if current else (1920, 1080)
         self.set_size_request(max(120, int(w * TILE_SCALE)), max(70, int(h * TILE_SCALE)))
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -241,11 +242,9 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application) -> None:
         super().__init__(application=app, title="Custom Resolution Panel",
                          default_width=980, default_height=900, css_classes=["pr-window"])
-        try:
-            self.mutter = DisplayConfig()
-            self.mutter.on_changed = self._schedule_reload
-        except GLib.Error:
-            self.mutter = None
+        self.display = display.detect()
+        if self.display and self.display.notifies_changes:
+            self.display.on_changed = self._schedule_reload
         self._reload_source = 0
         self.monitors: list[system.Monitor] = []
         self.selected: str | None = None
@@ -316,17 +315,16 @@ class MainWindow(Adw.ApplicationWindow):
         strip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16, css_classes=["layout-strip"])
         tiles = Gtk.Box(spacing=16, halign=Gtk.Align.CENTER)
         try:
-            layout = self.mutter.layout() if self.mutter else {}
-        except GLib.Error:
+            layout = self.display.layout([m.connector for m in self.monitors]) if self.display else {}
+        except display.DisplayError:
             layout = {}
-        from .mutter import mutter_connector
 
         def position(mon):
-            return layout.get(mutter_connector(mon.connector), (10**6, 0, False))
+            return layout.get(mon.connector, (10**6, 0, False))
 
         for mon in sorted(self.monitors, key=lambda m: position(m)[:2]):
             column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.END)
-            tile = MonitorTile(mon, self.mutter_current(mon.connector), position(mon)[2],
+            tile = MonitorTile(mon, self.display_current(mon.connector), position(mon)[2],
                                mon.connector == self.selected)
             tile.connect("clicked", lambda _b, c=mon.connector: self.select(c))
             column.append(tile)
@@ -347,7 +345,7 @@ class MainWindow(Adw.ApplicationWindow):
         top.append(pill)
         hero.append(top)
 
-        current = self.mutter_current(mon.connector)
+        current = self.display_current(mon.connector)
         numbers = Gtk.Box(spacing=14)
         if current:
             numbers.append(label(str(current.width), "hero-number"))
@@ -370,6 +368,7 @@ class MainWindow(Adw.ApplicationWindow):
             if lim.max_clock_khz:
                 meta.append(f"up to {lim.max_clock_khz // 1000} MHz")
         meta.append(f"EDID {mon.original.version}")
+        meta.append(self.display.name if self.display else "mode switching not supported on this desktop")
         hero.append(label("  ·  ".join(meta), "hero-meta", xalign=0))
         return hero
 
@@ -392,10 +391,13 @@ class MainWindow(Adw.ApplicationWindow):
                           "card-tech", xalign=0))
 
         actions = Gtk.Box(spacing=4, margin_top=4)
-        available = self.mutter_find(mon.connector, t)
+        available = self.display_find(mon.connector, t)
+        if self.display is None:
+            hint = "Switching modes from here isn't supported on this desktop; pick it in your display settings"
+        else:
+            hint = None if available else "Click “Test now” first"
         use = Gtk.Button(label="Use", css_classes=["use-btn"], hexpand=True, halign=Gtk.Align.START,
-                         sensitive=available is not None and not in_use,
-                         tooltip_text=None if available else "Click “Test now” first")
+                         sensitive=available is not None and not in_use, tooltip_text=hint)
         use.connect("clicked", lambda _b: self.switch_mode(mon, t))
         edit = Gtk.Button(icon_name="document-edit-symbolic", css_classes=["icon-btn", "flat"],
                           tooltip_text="Edit")
@@ -413,7 +415,7 @@ class MainWindow(Adw.ApplicationWindow):
         flow = Gtk.FlowBox(css_classes=["cards"], selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
                            min_children_per_line=1, max_children_per_line=3,
                            column_spacing=14, row_spacing=14)
-        current = self.mutter_current(mon.connector)
+        current = self.display_current(mon.connector)
         for i, cm in enumerate(mon.modes):
             flow.append(self._mode_card(mon, i, cm, current))
         if len(mon.modes) < edid.MAX_CUSTOM_MODES:
@@ -489,10 +491,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.restore_btn.set_sensitive(live != "original" or persisted != "none")
         self.action_status.set_label(f"{mon.original.name or mon.connector} — {status_of(mon)[1]}")
 
-    def _schedule_reload(self) -> None:
+    def _schedule_reload(self, delay_ms: int = 400) -> None:
         # Mutter sends several MonitorsChanged in a row; reload only once.
         if not self._reload_source:
-            self._reload_source = GLib.timeout_add(400, self.reload)
+            self._reload_source = GLib.timeout_add(delay_ms, self.reload)
 
     def save(self) -> None:
         system.save(self.monitors)
@@ -503,17 +505,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.save()
         self.reload()
 
-    def mutter_current(self, connector):
+    def display_current(self, connector):
         try:
-            return self.mutter.current_mode(connector) if self.mutter else None
-        except GLib.Error:
+            return self.display.current_mode(connector) if self.display else None
+        except display.DisplayError:
             return None
 
-    def mutter_find(self, connector, t: edid.Timing):
+    def display_find(self, connector, t: edid.Timing):
         try:
-            return self.mutter.find_mode(connector, t.h_active, t.v_active, t.refresh_hz) if self.mutter else None
-        except GLib.Error:
+            return self.display.find_mode(connector, t.h_active, t.v_active, t.refresh_hz) if self.display else None
+        except display.DisplayError:
             return None
+
+    def _reload_soon(self) -> None:
+        """For compositors that don't announce changes, look again once they have settled."""
+        if self.display is None or not self.display.notifies_changes:
+            self._schedule_reload(1500)
 
     # -------------------------------------------------------------- actions ---
 
@@ -556,22 +563,24 @@ class MainWindow(Adw.ApplicationWindow):
                 alert.add_response("ok", "OK")
                 alert.present(self)
             self.reload()
+            self._reload_soon()
         return callback
 
     # ---------------------------------------------------------- mode switch ---
 
     def switch_mode(self, mon: system.Monitor, t: edid.Timing) -> None:
         """Like on Windows: apply, ask, and revert on its own if there is no answer."""
-        target = self.mutter_find(mon.connector, t)
-        previous = self.mutter_current(mon.connector)
+        target = self.display_find(mon.connector, t)
+        previous = self.display_current(mon.connector)
         if not target or not previous:
-            self.toast("GNOME does not offer this mode yet")
+            self.toast("The desktop does not offer this mode yet")
             return
         try:
-            self.mutter.apply_mode(mon.connector, target.id, persistent=False)
-        except (GLib.Error, RuntimeError) as e:
-            self.toast(f"GNOME rejected the mode: {getattr(e, 'message', e)}")
+            self.display.apply_mode(mon.connector, target, persistent=False)
+        except display.DisplayError as e:
+            self.toast(f"The desktop rejected the mode: {e}")
             return
+        self._reload_soon()
 
         alert = Adw.AlertDialog(heading="Keep this resolution?")
         alert.add_response("revert", "Revert")
@@ -598,14 +607,27 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.source_remove(countdown["source"])
                 countdown["source"] = 0
             try:
-                if response == "keep":
-                    self.mutter.apply_mode(mon.connector, target.id, persistent=True)
-                else:
-                    self.mutter.apply_mode(mon.connector, previous.id, persistent=True)
-            except (GLib.Error, RuntimeError) as e:
-                self.toast(f"Failed to apply: {getattr(e, 'message', e)}")
+                keep = response == "keep"
+                config_line = self.display.apply_mode(mon.connector, target if keep else previous, persistent=True)
+            except display.DisplayError as e:
+                self.toast(f"Failed to apply: {e}")
+                return
+            self._reload_soon()
+            if keep and config_line:
+                self._show_config_line(config_line)
 
         alert.connect("response", answered)
+        alert.present(self)
+
+
+    def _show_config_line(self, line: str) -> None:
+        """Hyprland and Sway only change modes until logout; the user's config has the final say."""
+        alert = Adw.AlertDialog(
+            heading="Make it stick after logout",
+            body=f"{self.display.name} applied the mode for this session only. "
+                 "To keep it, add this line to your config file:")
+        alert.set_extra_child(label(line, "card-tech", selectable=True, wrap=True, xalign=0))
+        alert.add_response("ok", "OK")
         alert.present(self)
 
 

@@ -79,6 +79,10 @@ button.monitor-tile:hover {
   border-color: #3a3a3a;
 }
 
+button.monitor-tile:focus-visible {
+  outline-color: rgba(255, 255, 255, 0.35);
+}
+
 button.monitor-tile.selected {
   border: 1px solid var(--pr-accent);
   box-shadow: inset 0 0 0 1px var(--pr-accent);
