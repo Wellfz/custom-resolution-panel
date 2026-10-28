@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Custom Resolution Panel
+Comment=Create custom resolutions and refresh rates for your monitors
+Exec=custom-resolution-panel
+Icon=io.github.wellfz.CustomResolutionPanel
+Categories=Settings;HardwareSettings;
+Keywords=resolution;monitor;display;edid;hz;refresh;rate;custom;
+StartupWMClass=io.github.wellfz.CustomResolutionPanel

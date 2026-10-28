@@ -1,0 +1,4 @@
+# Custom Resolution Panel: after changing a monitor's EDID, the helper sends a
+# synthetic uevent with HOTPLUG=1. The kernel passes that argument along as
+# SYNTH_ARG_HOTPLUG; Mutter only re-reads the monitors when it sees HOTPLUG=1.
+ACTION=="change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*", ENV{SYNTH_ARG_HOTPLUG}=="1", ENV{HOTPLUG}="1"

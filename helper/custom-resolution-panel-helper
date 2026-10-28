@@ -1,0 +1,170 @@
+#!/usr/bin/python3 -I
+"""The part of Custom Resolution Panel that runs as root (through pkexec).
+
+Installed in /usr/local/libexec and owned by root, so no user process can swap
+the code that pkexec runs. It takes the EDID as hex on the command line, never
+a file path.
+
+  apply-live CONNECTOR HEX    inject the EDID through debugfs (gone after reboot)
+  reset-live CONNECTOR        go back to the monitor's real EDID
+  persist [CONNECTOR=HEX ...] write the EDIDs and drm.edid_firmware to GRUB;
+                              with no arguments, remove everything
+"""
+
+import glob
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+
+CONNECTOR_RE = re.compile(r"^[A-Za-z]+(-[A-Za-z])?-\d+$")
+FIRMWARE_DIR = "/usr/lib/firmware/edid"
+FIRMWARE_PREFIX = "custom-resolution-panel-"
+GRUB_DEFAULT = "/etc/default/grub"
+GRUB_KEY = "GRUB_CMDLINE_LINUX_DEFAULT"
+PARAM = "drm.edid_firmware="
+
+
+def die(msg: str, code: int = 1) -> None:
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def check_connector(name: str) -> str:
+    if not CONNECTOR_RE.match(name):
+        die(f"invalid connector name: {name!r}")
+    paths = glob.glob(f"/sys/class/drm/card[0-9]*-{name}")
+    if len(paths) != 1:
+        die(f"connector {name} not found")
+    return paths[0]
+
+
+def check_edid(hex_data: str) -> bytes:
+    try:
+        raw = bytes.fromhex(hex_data)
+    except ValueError:
+        die("the EDID is not valid hex")
+    if not 128 <= len(raw) <= 128 * 8 or len(raw) % 128:
+        die(f"invalid EDID size: {len(raw)}")
+    if raw[:8] != bytes([0, 255, 255, 255, 255, 255, 255, 0]):
+        die("invalid EDID header")
+    for i in range(0, len(raw), 128):
+        if sum(raw[i:i + 128]) & 0xFF:
+            die(f"invalid checksum in block {i // 128}")
+    if raw[126] != len(raw) // 128 - 1:
+        die("extension count does not match the EDID size")
+    return raw
+
+
+def debugfs_dir(sysfs_connector: str, name: str) -> str:
+    """The connector's debugfs directory: /sys/kernel/debug/dri/<minor or PCI address>/<connector>."""
+    card = os.path.basename(sysfs_connector).split("-", 1)[0]
+    minor = card.removeprefix("card")
+    pci = os.path.basename(os.path.realpath(f"/sys/class/drm/{card}/device"))
+    for base in (minor, pci):
+        path = f"/sys/kernel/debug/dri/{base}/{name}"
+        if os.path.isfile(f"{path}/edid_override"):
+            return path
+    die(f"no edid_override for {name} in debugfs (is debugfs mounted?)")
+
+
+def reprobe(sysfs_connector: str) -> None:
+    """Make the kernel re-read the connector and tell GNOME, as if the cable was replugged."""
+    with open(f"{sysfs_connector}/status", "w") as f:
+        f.write("detect")
+    card = os.path.dirname(os.path.realpath(sysfs_connector))
+    # Synthetic uevent; the 61-custom-resolution-panel.rules udev rule turns
+    # SYNTH_ARG_HOTPLUG=1 into HOTPLUG=1, which is what Mutter listens for.
+    with open(f"{card}/uevent", "w") as f:
+        f.write("change 00000000-0000-0000-0000-000000000000 HOTPLUG=1")
+
+
+def apply_live(name: str, hex_data: str) -> None:
+    sysfs = check_connector(name)
+    raw = check_edid(hex_data)
+    with open(f"{debugfs_dir(sysfs, name)}/edid_override", "wb") as f:
+        f.write(raw)
+    reprobe(sysfs)
+
+
+def reset_live(name: str) -> None:
+    sysfs = check_connector(name)
+    with open(f"{debugfs_dir(sysfs, name)}/edid_override", "w") as f:
+        f.write("reset")
+    reprobe(sysfs)
+
+
+def _rewrite_grub(entries: list[str]) -> bool:
+    with open(GRUB_DEFAULT) as f:
+        lines = f.read().split("\n")
+    key_re = re.compile(rf"^{GRUB_KEY}=(.*)$")
+    for i, line in enumerate(lines):
+        m = key_re.match(line)
+        if not m:
+            continue
+        words = shlex.split(m.group(1))
+        if len(words) > 1:
+            die(f"unexpected {GRUB_KEY} format; edit it by hand")
+        args = [a for a in (words[0] if words else "").split() if not a.startswith(PARAM)]
+        if entries:
+            args.append(PARAM + ",".join(entries))
+        new_line = f"{GRUB_KEY}='{' '.join(args)}'"
+        if new_line == line:
+            return False
+        lines[i] = new_line
+        break
+    else:
+        die(f"{GRUB_KEY} not found in {GRUB_DEFAULT}")
+    backup = f"{GRUB_DEFAULT}.custom-resolution-panel.{time.strftime('%Y%m%d-%H%M%S')}.bak"
+    shutil.copy2(GRUB_DEFAULT, backup)
+    tmp = GRUB_DEFAULT + ".custom-resolution-panel.tmp"
+    with open(tmp, "w") as f:
+        f.write("\n".join(lines))
+    shutil.copymode(GRUB_DEFAULT, tmp)
+    os.replace(tmp, GRUB_DEFAULT)
+    print(f"GRUB backup: {backup}")
+    return True
+
+
+def persist(pairs: list[str]) -> None:
+    wanted = {}
+    for pair in pairs:
+        name, _, hex_data = pair.partition("=")
+        check_connector(name)
+        wanted[name] = check_edid(hex_data)
+
+    os.makedirs(FIRMWARE_DIR, exist_ok=True)
+    for old in glob.glob(f"{FIRMWARE_DIR}/{FIRMWARE_PREFIX}*.bin"):
+        if os.path.basename(old)[len(FIRMWARE_PREFIX):-4] not in wanted:
+            os.remove(old)
+    entries = []
+    for name, raw in sorted(wanted.items()):
+        path = f"{FIRMWARE_DIR}/{FIRMWARE_PREFIX}{name}.bin"
+        with open(path, "wb") as f:
+            f.write(raw)
+        os.chmod(path, 0o644)
+        entries.append(f"{name}:edid/{FIRMWARE_PREFIX}{name}.bin")
+
+    if _rewrite_grub(entries):
+        subprocess.run(["grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True)
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        die("must run as root (through pkexec)")
+    args = sys.argv[1:]
+    if len(args) == 3 and args[0] == "apply-live":
+        apply_live(args[1], args[2])
+    elif len(args) == 2 and args[0] == "reset-live":
+        reset_live(args[1])
+    elif args and args[0] == "persist":
+        persist(args[1:])
+    else:
+        die(__doc__.strip(), 2)
+
+
+if __name__ == "__main__":
+    main()

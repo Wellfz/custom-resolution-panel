@@ -1,0 +1,331 @@
+/* Custom Resolution Panel theme: black, greys and a single accent colour.
+   To change the colour, edit only --pr-accent and --pr-accent-hover. */
+
+:root {
+  --pr-accent: #e5534b;
+  --pr-accent-hover: #ef6b63;
+}
+
+/* libadwaita applies the system accent colour on the window node; redefining
+   it there (not only on :root) is what makes its widgets use ours. */
+window, dialog, popover {
+  --accent-bg-color: var(--pr-accent);
+  --accent-fg-color: #ffffff;
+  --accent-color: var(--pr-accent-hover);
+  --window-bg-color: #000000;
+  --window-fg-color: #ededed;
+  --view-bg-color: #0a0a0a;
+  --view-fg-color: #ededed;
+  --headerbar-bg-color: #000000;
+  --headerbar-shade-color: #1c1c1c;
+  --card-bg-color: #0d0d0d;
+  --card-shade-color: transparent;
+  --dialog-bg-color: #0a0a0a;
+  --popover-bg-color: #111111;
+  --border-color: #1f1f1f;
+}
+
+window.pr-window {
+  background: #000000;
+}
+
+headerbar {
+  background: #000000;
+  box-shadow: inset 0 -1px #1c1c1c;
+}
+
+/* ---------- header ---------- */
+
+.brand-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.version-badge {
+  font-family: "Adwaita Mono";
+  font-size: 11px;
+  color: #6e6e6e;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a0a0a0;
+}
+
+.section-count {
+  font-family: "Adwaita Mono";
+  font-size: 12px;
+  color: #5a5a5a;
+}
+
+/* ---------- monitor layout map ---------- */
+
+.layout-strip {
+  border: 1px solid #1c1c1c;
+  border-radius: 10px;
+  padding: 24px;
+}
+
+button.monitor-tile {
+  background: #0d0d0d;
+  border: 1px solid #262626;
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: none;
+}
+
+button.monitor-tile:hover {
+  border-color: #3a3a3a;
+}
+
+button.monitor-tile.selected {
+  border: 1px solid var(--pr-accent);
+  box-shadow: inset 0 0 0 1px var(--pr-accent);
+}
+
+.tile-name {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.tile-mode {
+  font-family: "Adwaita Mono";
+  font-size: 11px;
+  color: #8a8a8a;
+}
+
+.badge {
+  font-family: "Adwaita Mono";
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #2a2a2a;
+  color: #8a8a8a;
+}
+
+.badge.primary {
+  color: #c8c8c8;
+}
+
+/* ---------- selected monitor ---------- */
+
+.hero {
+  border: 1px solid #1c1c1c;
+  border-radius: 10px;
+  padding: 22px 24px;
+}
+
+.hero-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.hero-number,
+.hero-hz {
+  font-size: 40px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.hero-times {
+  font-size: 26px;
+  color: #4a4a4a;
+}
+
+.hero-unit {
+  font-size: 16px;
+  font-weight: 600;
+  color: #8a8a8a;
+}
+
+.hero-meta {
+  font-size: 12.5px;
+  color: #7a7a7a;
+}
+
+.pill {
+  font-size: 12.5px;
+  color: #a0a0a0;
+}
+
+.pill .dot {
+  min-width: 7px;
+  min-height: 7px;
+  border-radius: 99px;
+  background: #4a4a4a;
+}
+
+.pill.ok,
+.pill.live {
+  color: #ededed;
+}
+
+.pill.ok .dot,
+.pill.live .dot {
+  background: var(--pr-accent);
+}
+
+.pill.pending .dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--pr-accent);
+}
+
+/* ---------- resolution cards ---------- */
+
+flowbox.cards > flowboxchild {
+  padding: 0;
+  background: none;
+}
+
+.mode-card {
+  background: #0a0a0a;
+  border: 1px solid #1f1f1f;
+  border-radius: 8px;
+  padding: 14px 14px 10px 14px;
+}
+
+.mode-card:hover {
+  border-color: #333333;
+}
+
+.mode-card.in-use {
+  border-color: var(--pr-accent);
+}
+
+.card-res {
+  font-size: 20px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.card-tech {
+  font-family: "Adwaita Mono";
+  font-size: 11px;
+  color: #6e6e6e;
+}
+
+.hz {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ededed;
+}
+
+.tag {
+  font-size: 12px;
+  color: #7a7a7a;
+}
+
+.inuse-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pr-accent-hover);
+}
+
+button.add-card {
+  border: 1px dashed #2e2e2e;
+  border-radius: 8px;
+  background: transparent;
+  color: #7a7a7a;
+  min-height: 140px;
+}
+
+button.add-card:hover {
+  border-color: #4a4a4a;
+  color: #ededed;
+}
+
+button.use-btn {
+  border-radius: 6px;
+  padding: 3px 14px;
+  font-weight: 600;
+  background: #1a1a1a;
+}
+
+button.use-btn:hover {
+  background: #262626;
+}
+
+button.icon-btn {
+  border-radius: 6px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  color: #8a8a8a;
+}
+
+/* ---------- factory modes ---------- */
+
+.chip {
+  font-family: "Adwaita Mono";
+  font-size: 11.5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #1f1f1f;
+  color: #a0a0a0;
+}
+
+/* ---------- action bar ---------- */
+
+.action-bar {
+  background: #000000;
+  border-top: 1px solid #1c1c1c;
+  padding: 10px 20px;
+}
+
+.action-status {
+  font-size: 12.5px;
+  color: #8a8a8a;
+}
+
+button.cta {
+  background: var(--pr-accent);
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 6px 16px;
+}
+
+button.cta:hover {
+  background: var(--pr-accent-hover);
+}
+
+button.cta:disabled {
+  background: #141414;
+  color: #4a4a4a;
+}
+
+button.ghost {
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-weight: 600;
+  background: #141414;
+}
+
+button.ghost:hover {
+  background: #1f1f1f;
+}
+
+/* ---------- dialog ---------- */
+
+.result-card {
+  border: 1px solid #1f1f1f;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.result-number,
+.result-hz {
+  font-size: 24px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.warning-text {
+  color: var(--pr-accent-hover);
+  font-size: 12.5px;
+}
+
+switch:checked {
+  background: var(--pr-accent);
+}
