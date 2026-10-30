@@ -1,11 +1,3 @@
-"""EDID parsing and generation of EDIDs with custom modes.
-
-Custom modes go into an extra CTA-861 extension block appended to the end of
-the original EDID. Everything else (identity, FreeSync, range limits) stays
-untouched, so GNOME keeps recognising the monitor, and removing the modes is
-just a matter of dropping that block.
-"""
-
 from __future__ import annotations
 
 import math
@@ -26,7 +18,6 @@ class EdidError(ValueError):
 
 @dataclass(frozen=True)
 class Timing:
-    """Timing of a progressive mode; clock in kHz, everything else in pixels/lines."""
 
     clock_khz: int
     h_active: int
@@ -92,7 +83,6 @@ class EdidInfo:
 
     @property
     def identity(self) -> str:
-        """Stable monitor key, the same one GNOME uses (vendor/product/serial)."""
         serial = self.serial_text or str(self.serial)
         return f"{self.vendor}-{self.product_code:04x}-{serial}"
 
@@ -246,7 +236,6 @@ def parse(raw: bytes) -> EdidInfo:
 
 
 def _has_eeodb(block: bytes) -> bool:
-    """HF-EEODB overrides the extension count; better to refuse than to edit it wrong."""
     i, end = 4, block[2]
     while i < end:
         tag, length = block[i] >> 5, block[i] & 0x1F
@@ -274,7 +263,6 @@ def build(original: bytes, modes: list[Timing]) -> bytes:
     ext[0] = CTA_TAG
     ext[1] = 3
     ext[2] = 4  # no data blocks: DTDs start right after the header
-    # CTA-861 requires byte 3 (underscan/audio/YCbCr/native count) to match in every block.
     ext[3] = first_cta[3] if first_cta is not None else 0
     off = 4
     for mode in modes:
@@ -290,8 +278,6 @@ def build(original: bytes, modes: list[Timing]) -> bytes:
     return result
 
 
-# ---------------------------------------------------------------- timings ---
-
 def _cvt_vsync_width(h: int, v: int) -> int:
     for (aw, ah), width in (((4, 3), 4), ((16, 9), 5), ((16, 10), 6), ((5, 4), 7), ((15, 9), 7)):
         if h * ah == v * aw:
@@ -300,7 +286,6 @@ def _cvt_vsync_width(h: int, v: int) -> int:
 
 
 def cvt_rb(h: int, v: int, refresh: float) -> Timing:
-    """VESA CVT 1.2, reduced blanking v1 (fixed 160-pixel horizontal blanking)."""
     h = h // 8 * 8
     v_sync = _cvt_vsync_width(h, v)
     h_period = (1_000_000 / refresh - 460) / v
@@ -315,9 +300,7 @@ def cvt_rb(h: int, v: int, refresh: float) -> Timing:
         h_sync_positive=True, v_sync_positive=False,
     )
 
-
 def cvt_rb2(h: int, v: int, refresh: float) -> Timing:
-    """VESA CVT 1.2, reduced blanking v2 (80-pixel horizontal blanking)."""
     h_period = (1_000_000 / refresh - 460) / v
     vbi = max(math.floor(460 / h_period) + 1, 1 + 8 + 6)
     v_total = v + vbi
@@ -330,24 +313,16 @@ def cvt_rb2(h: int, v: int, refresh: float) -> Timing:
         h_sync_positive=True, v_sync_positive=False,
     )
 
-
 def from_native(native: Timing, h: int, v: int, refresh: float) -> Timing:
-    """Reuse the blanking of the monitor's native mode and recompute the pixel clock.
-
-    This is what CRU's "LCD native" does: monitor scalers tend to accept timings
-    that look like the ones they advertise themselves.
-    """
     t = replace(native, h_active=h, v_active=v)
     clock_khz = round(refresh * t.h_total * t.v_total / 1000 / 10) * 10
     return replace(t, clock_khz=clock_khz)
-
 
 STANDARDS = {
     "native": "Monitor native",
     "cvt-rb2": "CVT-RB2",
     "cvt-rb": "CVT-RB",
 }
-
 
 def calculate(standard: str, h: int, v: int, refresh: float, native: Timing | None) -> Timing:
     if standard == "native":

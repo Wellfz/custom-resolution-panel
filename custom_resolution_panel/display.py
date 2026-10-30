@@ -1,17 +1,3 @@
-"""Talking to the compositor: list modes, show the layout and switch modes.
-
-Creating custom modes (the EDID part) works on any desktop because it happens in
-the kernel. Switching to a mode from inside the app needs to talk to the
-compositor, which is what the backends below do:
-
-  GNOME       Mutter D-Bus API (org.gnome.Mutter.DisplayConfig)
-  KDE Plasma  kscreen-doctor
-  Hyprland    hyprctl
-  Sway        swaymsg
-
-All methods take kernel (DRM) connector names such as "DP-3" or "HDMI-A-1".
-"""
-
 from __future__ import annotations
 
 import json
@@ -23,7 +9,6 @@ from dataclasses import dataclass
 
 from gi.repository import Gio, GLib
 
-
 @dataclass
 class Mode:
     id: str
@@ -33,14 +18,11 @@ class Mode:
     current: bool = False
     vrr: bool = False
 
-
 class DisplayError(RuntimeError):
     pass
 
-
 class Backend:
     name = ""
-    # True when the compositor tells us about changes; otherwise the app reloads by itself.
     notifies_changes = False
     on_changed = None
 
@@ -82,8 +64,6 @@ def _json(*cmd: str):
     except ValueError as e:
         raise DisplayError(f"{cmd[0]} returned invalid JSON") from e
 
-
-# ------------------------------------------------------------------- GNOME ---
 
 class MutterBackend(Backend):
     name = "GNOME"
@@ -134,11 +114,6 @@ class MutterBackend(Backend):
                 for c in connectors if self.connector_name(c) in by_mutter_name}
 
     def apply_mode(self, connector: str, mode: Mode, persistent: bool) -> str | None:
-        """Switch one monitor's mode, keep the others, and close up the layout.
-
-        Mutter rejects overlapping monitors and gaps between them, so monitors to
-        the right of / below the changed one shift along with its size change.
-        """
         serial, monitors, logical, props = self._state()
         name = self.connector_name(connector)
         current = {}
@@ -180,11 +155,8 @@ class MutterBackend(Backend):
         return None
 
 
-# -------------------------------------------------------------- KDE Plasma ---
 
 class KScreenBackend(Backend):
-    """kscreen-doctor; KWin uses the kernel connector names and saves changes itself."""
-
     name = "KDE Plasma"
 
     def _outputs(self) -> list[dict]:
@@ -207,8 +179,6 @@ class KScreenBackend(Backend):
         _run("kscreen-doctor", f"output.{connector}.mode.{mode.id}")
         return None
 
-
-# ---------------------------------------------------------------- Hyprland ---
 
 class HyprlandBackend(Backend):
     name = "Hyprland"
@@ -248,11 +218,8 @@ class HyprlandBackend(Backend):
     def apply_mode(self, connector: str, mode: Mode, persistent: bool) -> str | None:
         rule = self._rule(connector, mode)
         _run("hyprctl", "keyword", "monitor", rule.replace(" ", ""))
-        # hyprctl changes are runtime only; the user's config decides what happens next login.
         return f"monitor = {rule}" if persistent else None
 
-
-# -------------------------------------------------------------------- Sway ---
 
 class SwayBackend(Backend):
     name = "Sway"
@@ -279,7 +246,6 @@ class SwayBackend(Backend):
 
     def apply_mode(self, connector: str, mode: Mode, persistent: bool) -> str | None:
         _run("swaymsg", "output", connector, "mode", mode.id)
-        # swaymsg changes are runtime only; the user's config decides what happens next login.
         return f"output {connector} mode {mode.id}" if persistent else None
 
 

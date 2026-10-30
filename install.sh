@@ -32,6 +32,7 @@ install -D -o root -g root -m 644 "data/$ID.desktop" "$DESKTOP"
 install -D -o root -g root -m 644 "data/$ID.svg" "$ICON"
 ln -sf "$SRC/custom-resolution-panel" "$BIN"
 udevadm control --reload
+"$HELPER" sync-service
 gtk-update-icon-cache -q -t /usr/local/share/icons/hicolor 2>/dev/null || true
 update-desktop-database -q /usr/local/share/applications 2>/dev/null || true
 echo "Installed. Open \"Custom Resolution Panel\" from the app menu or run: custom-resolution-panel"

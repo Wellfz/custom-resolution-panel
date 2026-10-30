@@ -32,6 +32,9 @@ Typical uses:
 - **Use**: switches to the resolution and reverts by itself after 15 s unless you
   confirm it, like on Windows.
 - **Save to boot**: makes it permanent via `drm.edid_firmware` in GRUB, with a backup.
+  It also installs a small systemd service that re-detects the monitors after each boot
+  (what **Test now** does), because without it NVIDIA accepts the modes but shows black
+  bars instead of stretching.
 - **Restore**: brings back the monitor's original EDID.
 
 ## Desktop support

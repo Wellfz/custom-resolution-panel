@@ -7,8 +7,12 @@ a file path.
 
   apply-live CONNECTOR HEX    inject the EDID through debugfs (gone after reboot)
   reset-live CONNECTOR        go back to the monitor's real EDID
-  persist [CONNECTOR=HEX ...] write the EDIDs and drm.edid_firmware to GRUB;
-                              with no arguments, remove everything
+  persist [CONNECTOR=HEX ...] write the EDIDs and drm.edid_firmware to GRUB and
+                              install the boot reprobe service; with no
+                              arguments, remove everything
+  reprobe-boot                run by that service at every boot (see below)
+  sync-service                install/remove that service to match the saved EDIDs
+                              (install.sh runs it, so updates fix older setups)
 """
 
 import glob
@@ -27,6 +31,20 @@ FIRMWARE_PREFIX = "custom-resolution-panel-"
 GRUB_DEFAULT = "/etc/default/grub"
 GRUB_KEY = "GRUB_CMDLINE_LINUX_DEFAULT"
 PARAM = "drm.edid_firmware="
+SERVICE_NAME = "custom-resolution-panel-reprobe.service"
+SERVICE_PATH = f"/etc/systemd/system/{SERVICE_NAME}"
+HELPER_PATH = "/usr/local/libexec/custom-resolution-panel-helper"
+SERVICE = f"""[Unit]
+Description=Re-detect monitors so custom resolutions work (Custom Resolution Panel)
+After=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart={HELPER_PATH} reprobe-boot
+
+[Install]
+WantedBy=graphical.target
+"""
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -153,6 +171,41 @@ def persist(pairs: list[str]) -> None:
 
     if _rewrite_grub(entries):
         regenerate_grub()
+    sync_reprobe_service(bool(entries))
+
+
+def reprobe_boot() -> None:
+    """Re-detect every connector that has a saved EDID, like "Test now" does.
+
+    A drm.edid_firmware EDID is loaded at boot without any hotplug event, and the
+    NVIDIA driver then accepts the extra modes but doesn't stretch them (black
+    bars, wrong refresh rate). The same reprobe + hotplug that "Test now" sends
+    after the desktop is up fixes it.
+    """
+    time.sleep(5)  # let the display manager and the compositor start listening
+    for path in sorted(glob.glob(f"{FIRMWARE_DIR}/{FIRMWARE_PREFIX}*.bin")):
+        name = os.path.basename(path)[len(FIRMWARE_PREFIX):-4]
+        try:
+            reprobe(check_connector(name))
+        except (OSError, SystemExit) as e:
+            print(f"could not reprobe {name}: {e}", file=sys.stderr)
+
+
+def sync_reprobe_service(enable: bool) -> None:
+    """Install (or remove) the systemd unit that runs reprobe_boot at every boot."""
+    if not shutil.which("systemctl") or not os.path.isdir("/run/systemd/system"):
+        print("systemd not found; run \"Test now\" after each boot instead", file=sys.stderr)
+        return
+    if enable:
+        with open(SERVICE_PATH, "w") as f:
+            f.write(SERVICE)
+        os.chmod(SERVICE_PATH, 0o644)
+        subprocess.run(["systemctl", "daemon-reload"], check=False)
+        subprocess.run(["systemctl", "enable", SERVICE_NAME], check=False)
+    elif os.path.exists(SERVICE_PATH):
+        subprocess.run(["systemctl", "disable", SERVICE_NAME], check=False)
+        os.remove(SERVICE_PATH)
+        subprocess.run(["systemctl", "daemon-reload"], check=False)
 
 
 def regenerate_grub() -> None:
@@ -179,6 +232,10 @@ def main() -> None:
         apply_live(args[1], args[2])
     elif len(args) == 2 and args[0] == "reset-live":
         reset_live(args[1])
+    elif args == ["sync-service"]:
+        sync_reprobe_service(bool(glob.glob(f"{FIRMWARE_DIR}/{FIRMWARE_PREFIX}*.bin")))
+    elif args == ["reprobe-boot"]:
+        reprobe_boot()
     elif args and args[0] == "persist":
         persist(args[1:])
     else:
